@@ -1,39 +1,54 @@
 import streamlit as st
 import pandas as pd
 import joblib
-from sklearn.preprocessing import LabelEncoder
-from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 
-# Load the trained model and preprocessing transformer
+# Load the best model
 model = joblib.load('best_model.pkl')
-ct = joblib.load('preprocessor.pkl')  # Assuming you saved the ColumnTransformer
 
 # Load data for encoding and scaling
 data = pd.read_csv('onlinefoods.csv')
-data = data.drop('Unnamed: 12', axis=1)  # Adjust if necessary
 
-# Create LabelEncoders for each categorical feature
+# Required columns for training
+required_columns = ['Age', 'Gender', 'Marital Status', 'Occupation', 'Monthly Income', 
+                    'Educational Qualifications', 'Family size', 'latitude', 'longitude', 'Pin code']
+
+# Ensure only the required columns are present
+data = data[required_columns]
+
+# Data preprocessing
 label_encoders = {}
-categorical_features = ['Gender', 'Marital Status', 'Occupation', 'Monthly Income', 'Educational Qualifications']
-for column in categorical_features:
-    if data[column].dtype == 'object' or data[column].dtype.name == 'category':
-        le = LabelEncoder()
-        data[column] = le.fit_transform(data[column])
-        label_encoders[column] = le
+for column in data.select_dtypes(include=['object']).columns:
+    le = LabelEncoder()
+    data[column] = data[column].astype(str)
+    le.fit(data[column])
+    data[column] = le.transform(data[column])
+    label_encoders[column] = le
 
-# Function to preprocess input
+scaler = StandardScaler()
+numeric_features = ['Age', 'Family size', 'Monthly Income', 'Pin code', 'latitude', 'longitude']
+data[numeric_features] = scaler.fit_transform(data[numeric_features])
+
+# Function to process user input
 def preprocess_input(user_input):
-    processed_input = pd.DataFrame([user_input])
-    for column in categorical_features:
-        if column in processed_input.columns:
+    processed_input = {col: [user_input.get(col, 'Unknown')] for col in required_columns}
+    for column in label_encoders:
+        if column in processed_input:
             input_value = processed_input[column][0]
             if input_value in label_encoders[column].classes_:
-                processed_input[column] = label_encoders[column].transform([input_value])[0]
+                processed_input[column] = label_encoders[column].transform([input_value])
             else:
-                processed_input[column] = -1  # Or another placeholder value
-    return ct.transform(processed_input)
+                # Default value for unknown categories
+                processed_input[column] = [-1]
+    processed_input = pd.DataFrame(processed_input)
+    # Ensure that all required columns are present
+    for col in numeric_features:
+        if col not in processed_input.columns:
+            processed_input[col] = [0]  # or another appropriate default value
+    processed_input[numeric_features] = scaler.transform(processed_input[numeric_features])
+    return processed_input
 
-# Streamlit app layout
+
 st.markdown("""
     <style>
     .main {
@@ -116,19 +131,21 @@ user_input = {
 # Map numbers to labels
 label_mapping = {0: 'No', 1: 'Yes'}
 
-if st.button('Predict'):
+if st.button('Prediksi'):
     user_input_processed = preprocess_input(user_input)
     try:
         prediction = model.predict(user_input_processed)
-        prediction_label = label_mapping.get(prediction[0], 'Yes')
+        # Replace number with appropriate label
+        prediction_label = label_mapping.get(prediction[0], 'Unknown')
         st.write(f'Prediction: {prediction_label}')
         
+        # Additional information about the prediction
         st.markdown("""
             <div class="info-box">
                 <div class="info-title">Informasi Tentang Hasil Prediksi:</div>
                 <div class="info-content">
                     <p><strong>Yes:</strong> Pelanggan melakukan tindakan tertentu</p>
-                    <p><strong>No:</strong> Pelanggan tidak melakukan tindakan tersebut.</p>
+                    <p><strong>No:</strong> Pelanggan tidak melakukan tindakan tersebut</p>
                 </div>
             </div>
         """, unsafe_allow_html=True)
